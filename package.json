@@ -1,0 +1,92 @@
+{
+  "name": "chatter",
+  "displayName": "Chatter - Remote Copilot Control",
+  "description": "Control GitHub Copilot via Telegram from anywhere",
+  "version": "0.1.0",
+  "publisher": "decarufe",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/decarufe/Chatter"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "copilot",
+    "telegram",
+    "remote",
+    "ai",
+    "chat"
+  ],
+  "activationEvents": [
+    "onCommand:chatter.configure",
+    "onCommand:chatter.start",
+    "onCommand:chatter.stop"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "chatter.start",
+        "title": "Chatter: Start Server"
+      },
+      {
+        "command": "chatter.stop",
+        "title": "Chatter: Stop Server"
+      },
+      {
+        "command": "chatter.configure",
+        "title": "Chatter: Configure"
+      }
+    ],
+    "configuration": {
+      "title": "Chatter",
+      "properties": {
+        "chatter.telegram.allowedUserId": {
+          "type": "number",
+          "description": "Your Telegram user ID (for security)"
+        },
+        "chatter.server.port": {
+          "type": "number",
+          "default": 3847,
+          "description": "Local webhook server port"
+        },
+        "chatter.notifications.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show VS Code notifications for Telegram activity"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npm run check-types && node esbuild.js --production",
+    "check-types": "tsc --noEmit",
+    "build": "node esbuild.js",
+    "build:watch": "node esbuild.js --watch",
+    "lint": "eslint src --ext ts",
+    "vsce:package": "vsce package"
+  },
+  "dependencies": {
+    "grammy": "^1.23.0",
+    "fastify": "^4.26.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "esbuild": "^0.20.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "@vscode/vsce": "^2.22.0"
+  }
+}
