@@ -2,7 +2,7 @@
   "name": "chatter",
   "displayName": "Chatter - Remote Copilot Control",
   "description": "Control GitHub Copilot via Telegram from anywhere",
-  "version": "0.1.0",
+  "version": "0.0.4",
   "publisher": "decarufe",
   "license": "MIT",
   "repository": {

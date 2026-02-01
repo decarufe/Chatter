@@ -6,16 +6,27 @@ export class CommandHandler {
   constructor(
     private copilot: CopilotBridge,
     private logger: Logger,
+    private sendMessage?: (
+      chatId: number,
+      text: string,
+      parseMode?: string,
+    ) => Promise<void>,
   ) {}
 
   async handleAsk(ctx: Context, includeContext: boolean) {
     const question = ctx.message?.text?.split(" ").slice(1).join(" ");
+    const chatId = ctx.chat?.id;
 
-    if (!question || question.trim().length === 0) {
-      await ctx.reply(
+    if (!chatId || !question || question.trim().length === 0) {
+      const msg =
         "❓ Please provide a question.\n\n" +
-          `Example: /${includeContext ? "context" : "ask"} How do I implement error handling?`,
-      );
+        `Example: /${includeContext ? "context" : "ask"} How do I implement error handling?`;
+
+      if (this.sendMessage && chatId) {
+        await this.sendMessage(chatId, msg);
+      } else {
+        await ctx.reply(msg);
+      }
       return;
     }
 
@@ -24,15 +35,24 @@ export class CommandHandler {
     );
 
     // Send typing indicator
-    await ctx.replyWithChatAction("typing");
+    if (this.sendMessage) {
+      // Can't send typing indicator with direct API, skip
+    } else {
+      await ctx.replyWithChatAction("typing");
+    }
 
     try {
       const response = await this.copilot.ask(question, includeContext);
 
       if (response.error) {
-        await ctx.reply(`⚠️ *Error*\n\n${response.error}`, {
-          parse_mode: "Markdown",
-        });
+        const errMsg = `⚠️ *Error*\n\n${response.error}`;
+        if (this.sendMessage) {
+          await this.sendMessage(chatId, errMsg, "Markdown");
+        } else {
+          await ctx.reply(errMsg, {
+            parse_mode: "Markdown",
+          });
+        }
         return;
       }
 
@@ -41,19 +61,32 @@ export class CommandHandler {
 
       // Telegram has a 4096 character limit
       if (formattedText.length <= 4096) {
-        await ctx.reply(formattedText, { parse_mode: "Markdown" });
+        if (this.sendMessage) {
+          await this.sendMessage(chatId, formattedText, "Markdown");
+        } else {
+          await ctx.reply(formattedText, { parse_mode: "Markdown" });
+        }
       } else {
         // Split into multiple messages
         const chunks = this.splitMessage(formattedText, 4000);
         for (const chunk of chunks) {
-          await ctx.reply(chunk, { parse_mode: "Markdown" });
+          if (this.sendMessage) {
+            await this.sendMessage(chatId, chunk, "Markdown");
+          } else {
+            await ctx.reply(chunk, { parse_mode: "Markdown" });
+          }
         }
       }
     } catch (error) {
+      const errMsg =
+        "❌ An error occurred while processing your request. Check VS Code logs for details.";
       this.logger.error("Error handling ask command", error as Error);
-      await ctx.reply(
-        "❌ An error occurred while processing your request. Check VS Code logs for details.",
-      );
+      const chatId = ctx.chat?.id;
+      if (this.sendMessage && chatId) {
+        await this.sendMessage(chatId, errMsg);
+      } else {
+        await ctx.reply(errMsg);
+      }
     }
   }
 

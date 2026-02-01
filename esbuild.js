@@ -13,7 +13,16 @@ async function main() {
     sourcesContent: false,
     platform: "node",
     outfile: "dist/extension.js",
-    external: ["vscode"],
+    external: [
+      "vscode",
+      "https",
+      "http",
+      "net",
+      "tls",
+      "crypto",
+      "stream",
+      "zlib",
+    ],
     logLevel: "info",
     plugins: [
       /* add to the end of plugins array */

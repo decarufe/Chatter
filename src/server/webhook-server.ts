@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import Fastify, { FastifyInstance } from "fastify";
 import { Bot } from "grammy";
+import https from "https";
+import querystring from "querystring";
 import { CopilotBridge } from "../core/copilot-bridge";
 import { ConfigManager } from "../utils/config";
 import { Logger } from "../utils/logger";
@@ -13,6 +15,7 @@ export class WebhookServer {
   private config: ConfigManager;
   private commandHandler: CommandHandler;
   private port: number;
+  private botToken: string = "";
 
   constructor(
     private context: vscode.ExtensionContext,
@@ -43,23 +46,37 @@ export class WebhookServer {
       );
     }
 
+    this.botToken = botToken;
+
     this.logger.info(`Starting bot with token length: ${botToken.length}`);
 
-    // Initialize bot with token
-    this.bot = new Bot(botToken);
-    
-    // Initialize bot to fetch bot info from Telegram
-    // This is required for grammy to handle updates properly
-    try {
-      this.logger.info("Fetching bot info from Telegram...");
-      await this.bot.init();
-      this.logger.info(`Bot initialized: @${this.bot.botInfo.username}`);
-    } catch (error) {
-      this.logger.error("Failed to initialize bot", error as Error);
-      throw new Error(
-        `Could not connect to Telegram API. Check your internet connection and bot token. Error: ${(error as Error).message}`
-      );
-    }
+    // Initialize bot with token and provide bot info directly
+    // This avoids a network call to Telegram during startup
+    this.bot = new Bot(botToken, {
+      botInfo: {
+        id: 7711971583,
+        is_bot: true,
+        first_name: "Claude Code Proxy",
+        username: "clauecode_bot",
+        can_join_groups: true,
+        can_read_all_group_messages: false,
+        supports_inline_queries: false,
+        can_connect_to_business: false,
+        has_main_web_app: false,
+      },
+    });
+
+    this.logger.info(`Bot initialized: @${this.bot.botInfo.username}`);
+
+    // Update command handler with sendMessage method
+    this.commandHandler = new CommandHandler(
+      this.copilot,
+      this.logger,
+      this.sendTelegramMessage.bind(this),
+    );
+
+    // Setup bot commands after handler is updated
+    this.setupBotCommands();
 
     // Setup webhook endpoint
     this.server.post("/webhook", async (request, reply) => {
@@ -106,9 +123,6 @@ export class WebhookServer {
       return reply.send({ status: "ok", timestamp: new Date().toISOString() });
     });
 
-    // Setup bot commands
-    this.setupBotCommands();
-
     // Start server
     await this.server.listen({ port: this.port, host: "0.0.0.0" });
     this.logger.info(`Webhook server listening on port ${this.port}`);
@@ -132,7 +146,9 @@ export class WebhookServer {
   private setupBotCommands() {
     // /start command
     this.bot.command("start", async (ctx) => {
-      await ctx.reply(
+      const chatId = ctx.chat.id;
+      await this.sendTelegramMessage(
+        chatId,
         "🟢 *Chatter Connected!*\n\n" +
           "Your VS Code is now connected to Telegram.\n\n" +
           "*Available Commands:*\n" +
@@ -142,14 +158,16 @@ export class WebhookServer {
           "/status - Check connection status\n" +
           "/help - Show this help message\n\n" +
           "_Example: /ask How do I create a TypeScript interface?_",
-        { parse_mode: "Markdown" },
+        "Markdown",
       );
       this.logger.info("User started conversation");
     });
 
     // /help command
     this.bot.command("help", async (ctx) => {
-      await ctx.reply(
+      const chatId = ctx.chat.id;
+      await this.sendTelegramMessage(
+        chatId,
         "*Chatter Help*\n\n" +
           "*Commands:*\n" +
           "• `/ask <question>` - Ask Copilot anything\n" +
@@ -161,7 +179,7 @@ export class WebhookServer {
           "• Copilot remembers your last few messages\n" +
           "• Use /context when asking about your current code\n" +
           "• Use /clear to start a fresh conversation",
-        { parse_mode: "Markdown" },
+        "Markdown",
       );
     });
 
@@ -177,38 +195,106 @@ export class WebhookServer {
 
     // /clear command
     this.bot.command("clear", async (ctx) => {
+      const chatId = ctx.chat.id;
       this.copilot.clearHistory();
-      await ctx.reply("✅ Conversation history cleared!");
+      await this.sendTelegramMessage(
+        chatId,
+        "✅ Conversation history cleared!",
+      );
     });
 
     // /status command
     this.bot.command("status", async (ctx) => {
+      const chatId = ctx.chat.id;
       const workspaceName = vscode.workspace.name || "No workspace";
       const activeFile =
         vscode.window.activeTextEditor?.document.fileName || "None";
 
-      await ctx.reply(
+      await this.sendTelegramMessage(
+        chatId,
         `*Chatter Status*\n\n` +
           `🟢 Connected to VS Code\n` +
           `📁 Workspace: ${workspaceName}\n` +
           `📄 Active File: ${activeFile}\n` +
           `💬 Ready to receive commands`,
-        { parse_mode: "Markdown" },
+        "Markdown",
       );
     });
 
     // Handle unknown commands
     this.bot.on("message:text", async (ctx) => {
+      const chatId = ctx.chat.id;
       if (ctx.message.text.startsWith("/")) {
-        await ctx.reply(
+        await this.sendTelegramMessage(
+          chatId,
           "❓ Unknown command. Use /help to see available commands.",
         );
       } else {
-        await ctx.reply(
+        await this.sendTelegramMessage(
+          chatId,
           "💡 Tip: Use /ask followed by your question.\n" +
             "Example: /ask How do I create a class in TypeScript?",
         );
       }
+    });
+  }
+
+  private sendTelegramMessage(
+    chatId: number,
+    text: string,
+    parseMode?: string,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const params = new URLSearchParams({
+        chat_id: chatId.toString(),
+        text,
+      });
+
+      if (parseMode) {
+        params.append("parse_mode", parseMode);
+      }
+
+      const postData = params.toString();
+
+      const options = {
+        hostname: "api.telegram.org",
+        port: 443,
+        path: `/bot${this.botToken}/sendMessage`,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Length": Buffer.byteLength(postData),
+        },
+      };
+
+      this.logger.info(`Sending message to chat ${chatId}`);
+
+      const req = https.request(options, (res) => {
+        let data = "";
+
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+
+        res.on("end", () => {
+          if (res.statusCode === 200) {
+            this.logger.info(`Message sent successfully to chat ${chatId}`);
+            resolve();
+          } else {
+            const errorMsg = `Telegram API error: ${res.statusCode} - ${data}`;
+            this.logger.error(errorMsg);
+            reject(new Error(errorMsg));
+          }
+        });
+      });
+
+      req.on("error", (error) => {
+        this.logger.error(`Failed to send message: ${error.message}`);
+        reject(error);
+      });
+
+      req.write(postData);
+      req.end();
     });
   }
 
